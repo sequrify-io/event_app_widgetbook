@@ -1,0 +1,70 @@
+workflows:
+  android-workflow:
+    name: Android Workflow
+    instance_type: mac_mini_m1
+    max_build_duration: 30
+    environment:
+      android_signing:
+        - keystore_reference_decider
+      groups:
+        - google_credentials
+        - android_variables
+      vars:
+        PACKAGE_NAME:  $PACKAGE_NAME
+        GOOGLE_PLAY_TRACK: "alpha" # <-- TODO: choose: internal | alpha | beta | production | custom
+      flutter: stable
+    scripts:
+      - name: Set up key.properties
+        script: |
+          echo $FCI_KEYSTORE | base64 --decode > $FCI_KEYSTORE_PATH
+                  cat >> "$FCI_BUILD_DIR/android/key.properties" <<EOF
+                  storePassword=$FCI_KEYSTORE_PASSWORD
+                  keyPassword=$FCI_KEY_PASSWORD
+                  keyAlias=$FCI_KEY_ALIAS
+                  storeFile=/tmp/keystore.keystore
+                  EOF
+      - name: Set up local.properties
+        script: |
+          echo "flutter.sdk=$HOME/programs/flutter" > "$CM_BUILD_DIR/android/local.properties"
+      - name: Build AAB with Flutter
+        script: |    
+          flutter build appbundle --release
+    artifacts:
+      - build/**/outputs/**/*.aab
+    publishing:
+      email:
+        recipients:
+          - $RECIPIENTS_EMAIL
+      google_play:
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        track: $GOOGLE_PLAY_TRACK
+        submit_as_draft: false
+  ios-workflow:
+    name: iOS Workflow
+    instance_type: mac_mini_m1
+    max_build_duration: 30
+    environment:
+      groups:
+        - ios_credentials
+        - ios_variables
+      ios_signing:
+        distribution_type: app_store # <-- TODO: choose: ad_hoc | development | enterprise | appstore
+        bundle_identifier: $IOS_BUNDLE_ID
+      flutter: stable
+    integrations:
+      app_store_connect: $IOS_API_KEY_NAME
+    scripts:
+      - name: Set up code signing settings on Xcode project
+        script: xcode-project use-profiles
+      - name: Build ipa for distribution
+        script: flutter build ipa --release --export-options-plist=/Users/builder/export_options.plist
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        expire_build_submitted_for_review: true
+        beta_groups:
+          - $IOS_BETA_TESTERS
